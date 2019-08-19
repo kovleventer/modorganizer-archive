@@ -1,5 +1,13 @@
 [![Build status](https://ci.appveyor.com/api/projects/status/hdthueiiuedeb38f?svg=true)](https://ci.appveyor.com/project/Modorganizer2/modorganizer-archive)
 
+# PNG support
+
+Mod Organizer is a great tool to organize your mods, but what about your mod archives? Sure, some of them are nice and easy to classify, the filename has the mod's and the author's name, nexus id, major and minor versioning up to six numbers, creation date with millisecond precision, et cetera. And the next mod in your folder is named 456.rar, contains an .esp and a .bsa both written with cyrillic or chinese letters. Good luck previewing that
+
+The solution is simple: Append the archive (like `cat img.png mod.rar > mod.rar.png`) at the end of a PNG file (which is supposed to be a preview for that archive) and that's it. To make it work completely you should add "png" to [installationmanager.cpp](https://github.com/ModOrganizer2/modorganizer/blob/Develop/src/installationmanager.cpp) the list at line 83 or something.
+
+How it works: The file is sent to 7zip with a given offset which is calculated beforehand. The PNG file structure allows relatively easy offset calculation with a single loop iterated over the chunks. The code is terrible and probably crashes the whole program on corrupted image files, but it works for my purposes so whatever.
+
 # modorganizer-archive
 
 This module provides a wrapper round the 7zip 7z.dll allowing easy(ish) access to the contents of an archive.

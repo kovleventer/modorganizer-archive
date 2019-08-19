@@ -101,6 +101,8 @@ public:
 
   virtual Error getLastError() const { return m_LastError; }
 
+  // The actual archive might start in the file on a non-zero offset
+  virtual bool openWithOffset(QString const &archiveName, PasswordCallback *passwordCallback, UInt64 offset);
   virtual bool open(const QString &archiveName, PasswordCallback *passwordCallback);
   virtual void close();
   virtual bool getFileList(FileData* const *&data, size_t &size);
@@ -315,7 +317,49 @@ ArchiveImpl::~ArchiveImpl()
   close();
 }
 
-bool ArchiveImpl::open(QString const &archiveName, PasswordCallback *passwordCallback)
+bool ArchiveImpl::open(QString const &archiveName, PasswordCallback *passwordCallback) {
+	QFileInfo finfo(archiveName);
+	CComPtr<InputStream> file(new InputStream);
+
+	if (!file->Open(finfo.absoluteFilePath())) {
+		m_LastError = ERROR_FAILED_TO_OPEN_ARCHIVE;
+		return false;
+	}
+	
+	QString extension = finfo.suffix().toLower();
+	if (extension == "png") {
+		qDebug() << "Trying to open png file as an archive";
+		// Ignoring PNG signature, seeking over it
+		file->Seek(8, FILE_BEGIN, nullptr);
+		UInt64 total_length = 8;
+		
+		// No safe length checks, no fallback on corrupt PNG files -- life is short, so is my code
+		while (true) {
+			// TODO better way to handle endianness
+			UInt32 chunk_length;
+			file->Read(&chunk_length, 4, nullptr);
+			chunk_length = (((chunk_length>>24) & 0x000000ff) | ((chunk_length>>8) & 0x0000ff00) | ((chunk_length<<8) & 0x00ff0000) | ((chunk_length<<24) & 0xff000000));
+			
+			std::vector<char> buf;
+			buf.reserve(4);
+			file->Read(buf.data(), 4, nullptr);
+			std::string chunk_type = std::string(buf.data(), 4);
+			file->Seek(4 + chunk_length, FILE_CURRENT, nullptr); // 4 is for CRC
+			total_length += 12 + chunk_length;
+			if (chunk_type == "IEND") {
+				break;
+			}
+		}
+		if (openWithOffset(archiveName, passwordCallback, total_length)) {
+			return true;
+		} else {
+			qDebug() << "Failed to extract archive from PNG";
+		}
+	}
+	return openWithOffset(archiveName, passwordCallback, 0);
+}
+
+bool ArchiveImpl::openWithOffset(QString const &archiveName, PasswordCallback *passwordCallback, UInt64 offset)
 {
   m_ArchiveName = archiveName; //Just for debugging, not actually used...
 
@@ -355,9 +399,9 @@ bool ArchiveImpl::open(QString const &archiveName, PasswordCallback *passwordCal
       std::vector<char> buff;
       buff.reserve(m_MaxSignatureLen);
       UInt32 act;
-      file->Seek(0, STREAM_SEEK_SET, nullptr);
+      file->Seek(offset, STREAM_SEEK_SET, nullptr); // Feels like m_SignatureOffset was missing here in the original code
       file->Read(buff.data(), static_cast<UInt32>(m_MaxSignatureLen), &act);
-      file->Seek(0, STREAM_SEEK_SET, nullptr);
+      file->Seek(offset, STREAM_SEEK_SET, nullptr);
       std::string signature = std::string(buff.data(), act);
       if (signatureInfo.first == std::string(buff.data(), signatureInfo.first.size())) {
         if (m_CreateObjectFunc(&signatureInfo.second.m_ClassID, &IID_IInArchive, (void**)&m_ArchivePtr) != S_OK) {
